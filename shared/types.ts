@@ -1,8 +1,11 @@
 export type VariableType = 'cost' | 'duration' | 'revenue' | 'custom';
+export type ScenarioType = 'baseline' | 'optimistic' | 'pessimistic' | 'custom';
+export type RiskLevel = 'low' | 'medium-low' | 'medium' | 'high' | null;
 
 export interface Variable {
   id: string;
   projectId: string;
+  scenarioId: string;
   name: string;
   type: VariableType;
   min: number;
@@ -21,8 +24,29 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface Scenario {
+  id: string;
+  projectId: string;
+  name: string;
+  type: ScenarioType;
+  description: string;
+  sourceScenarioId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastRunAt: string | null;
+  riskLevel: RiskLevel;
+}
+
 export interface ProjectWithVariables extends Project {
   variables: Variable[];
+}
+
+export interface ScenarioWithVariables extends Scenario {
+  variables: Variable[];
+}
+
+export interface ProjectWithScenarios extends Project {
+  scenarios: Scenario[];
 }
 
 export interface Percentiles {
@@ -53,6 +77,7 @@ export interface SensitivityItem {
 export interface SimulationResult {
   id: string;
   projectId: string;
+  scenarioId?: string;
   runName: string;
   iterations: number;
   timestamp: string;
@@ -118,4 +143,24 @@ export interface RunSimulationDto {
 export interface CreateCompareDto {
   name: string;
   simulationIds: string[];
+}
+
+export interface CreateScenarioDto {
+  name: string;
+  type?: ScenarioType;
+  description?: string;
+  sourceScenarioId: string | null;
+}
+
+export interface UpdateScenarioDto {
+  name?: string;
+  description?: string;
+}
+
+export interface CreateScenarioBranchDto {
+  name: string;
+  type?: ScenarioType;
+  description?: string;
+  sourceScenarioId: string;
+  adjustFactor?: number;
 }

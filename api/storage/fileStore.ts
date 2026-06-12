@@ -13,13 +13,14 @@ interface DataFile<T> {
   data: T[];
 }
 
-type StoreType = 'projects' | 'variables' | 'simulations' | 'comparisons';
+type StoreType = 'projects' | 'variables' | 'simulations' | 'comparisons' | 'scenarios';
 
 const FILES: Record<StoreType, string> = {
   projects: 'projects.json',
   variables: 'variables.json',
   simulations: 'simulations.json',
   comparisons: 'comparisons.json',
+  scenarios: 'scenarios.json',
 };
 
 function ensureDataDir(): void {

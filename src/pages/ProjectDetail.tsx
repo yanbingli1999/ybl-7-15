@@ -3,17 +3,19 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Plus, Trash2, Play, RefreshCw, BarChart3, AlertTriangle,
   TrendingUp, Target, Layers, History, GitCompare, Pencil, X, Save,
-  Clock, DollarSign, Calendar, Settings, Info, Sparkles,
+  Clock, DollarSign, Calendar, Settings, Info, Sparkles, GitBranch,
+  Sun, CloudRain, Copy,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAppStore } from '@/store/useAppStore';
 import { formatNumber, formatPercentage } from '../../shared/monteCarlo.js';
-import type { VariableType, CreateVariableDto, UpdateVariableDto, SimulationResult } from '../../shared/types.js';
+import type { VariableType, CreateVariableDto, UpdateVariableDto, SimulationResult, ScenarioType } from '../../shared/types.js';
 import HistogramChart from '@/components/HistogramChart';
 import SensitivityChart from '@/components/SensitivityChart';
 import StatsCards from '@/components/StatsCards';
 import SimulationHistory from '@/components/SimulationHistory';
 import CompareModal from '@/components/CompareModal';
+import ScenarioTree from '@/components/ScenarioTree';
 
 const VARIABLE_TYPE_CONFIG: Record<VariableType, { label: string; color: string; icon: any; defaultWeight: number; defaultUnit: string }> = {
   cost: { label: '成本', color: 'bg-red-500/20 text-red-300 border-red-500/40', icon: DollarSign, defaultWeight: -1, defaultUnit: '万元' },
@@ -25,11 +27,18 @@ const VARIABLE_TYPE_CONFIG: Record<VariableType, { label: string; color: string;
 export default function ProjectDetail() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
-  const { currentProject, simulations, currentSimulation, setCurrentProject, setSimulations, addVariable, updateVariable, removeVariable, addSimulation, removeSimulation, setCurrentSimulation, setLoading, setError } = useAppStore();
+  const {
+    currentProject, scenarios, currentScenario, simulations, currentSimulation,
+    setCurrentProject, setScenarios, setCurrentScenario, setSimulations,
+    addVariable, updateVariable, removeVariable, addSimulation, removeSimulation,
+    setCurrentSimulation, setLoading, setError, addScenario, updateScenario,
+    removeScenario, updateScenarioLastRun,
+  } = useAppStore();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showVarModal, setShowVarModal] = useState(false);
   const [showCompareModal, setShowCompareModal] = useState(false);
+  const [showScenarioPanel, setShowScenarioPanel] = useState(true);
   const [running, setRunning] = useState(false);
   const [iterations, setIterations] = useState(10000);
   const [threshold, setThreshold] = useState(0);
@@ -40,13 +49,28 @@ export default function ProjectDetail() {
   });
   const [editForm, setEditForm] = useState<Partial<any>>({});
 
+  const activeVariables = currentScenario?.variables || currentProject?.variables || [];
+  const activeScenarioId = currentScenario?.id;
+
   const loadProject = async () => {
     setLoading(true);
     try {
       const project = await api.projects.get(id);
       setCurrentProject(project);
-      const sims = await api.simulations.listByProject(id);
-      setSimulations(sims);
+
+      const scenariosData = await api.scenarios.listByProject(id);
+      setScenarios(scenariosData);
+
+      if (scenariosData.length > 0) {
+        const firstScenarioId = scenariosData.find(s => s.type === 'baseline')?.id || scenariosData[0].id;
+        const scenarioWithVars = await api.scenarios.get(firstScenarioId);
+        setCurrentScenario(scenarioWithVars);
+        const sims = await api.simulations.listByScenario(firstScenarioId);
+        setSimulations(sims);
+      } else {
+        const sims = await api.simulations.listByProject(id);
+        setSimulations(sims);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败');
       alert('加载项目失败');
@@ -58,8 +82,93 @@ export default function ProjectDetail() {
 
   useEffect(() => {
     loadProject();
-    return () => setCurrentProject(null);
+    return () => {
+      setCurrentProject(null);
+      setCurrentScenario(null);
+    };
   }, [id]);
+
+  const handleSelectScenario = async (scenario: any) => {
+    setLoading(true);
+    try {
+      const scenarioWithVars = await api.scenarios.get(scenario.id);
+      setCurrentScenario(scenarioWithVars);
+      const sims = await api.simulations.listByScenario(scenario.id);
+      setSimulations(sims);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '加载场景失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateBranch = async (sourceId: string, type: ScenarioType) => {
+    const typeNames: Record<ScenarioType, string> = {
+      baseline: '复制',
+      optimistic: '乐观',
+      pessimistic: '悲观',
+      custom: '自定义',
+    };
+    const adjustFactors: Record<ScenarioType, number> = {
+      baseline: 0,
+      optimistic: 0.1,
+      pessimistic: -0.1,
+      custom: 0,
+    };
+
+    const sourceScenario = scenarios.find(s => s.id === sourceId);
+    const name = prompt('场景名称:', `${sourceScenario?.name || '场景'} - ${typeNames[type]}`);
+    if (!name) return;
+
+    try {
+      const newScenario = await api.scenarios.createBranch(id, {
+        name,
+        type,
+        sourceScenarioId: sourceId,
+        adjustFactor: adjustFactors[type],
+      });
+      addScenario(newScenario);
+      const scenariosData = await api.scenarios.listByProject(id);
+      setScenarios(scenariosData);
+      const scenarioWithVars = await api.scenarios.get(newScenario.id);
+      setCurrentScenario(scenarioWithVars);
+      setSimulations([]);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '创建分支失败');
+    }
+  };
+
+  const handleRenameScenario = async (scenarioId: string, name: string) => {
+    try {
+      const updated = await api.scenarios.update(scenarioId, { name });
+      updateScenario(updated);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '重命名失败');
+    }
+  };
+
+  const handleDeleteScenario = async (scenarioId: string) => {
+    if (!confirm('删除此场景？相关变量和模拟结果也将被删除。')) return;
+    try {
+      await api.scenarios.remove(scenarioId);
+      removeScenario(scenarioId);
+      const remainingScenarios = scenarios.filter(s => s.id !== scenarioId);
+      if (remainingScenarios.length > 0) {
+        const firstId = remainingScenarios.find(s => s.type === 'baseline')?.id || remainingScenarios[0].id;
+        const scenarioWithVars = await api.scenarios.get(firstId);
+        setCurrentScenario(scenarioWithVars);
+        const sims = await api.simulations.listByScenario(firstId);
+        setSimulations(sims);
+      } else {
+        setCurrentScenario(null);
+        setSimulations([]);
+      }
+      const scenariosData = await api.scenarios.listByProject(id);
+      setScenarios(scenariosData);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '删除失败');
+    }
+  };
 
   const handleAddVariable = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,7 +187,12 @@ export default function ProjectDetail() {
         alert('参数必须满足：最小值 < 最可能值 < 最大值');
         return;
       }
-      const v = await api.projects.addVariable(id, payload);
+      let v;
+      if (activeScenarioId) {
+        v = await api.scenarios.addVariable(activeScenarioId, payload);
+      } else {
+        v = await api.projects.addVariable(id, payload);
+      }
       addVariable(v);
       setShowVarModal(false);
       setVarForm({ name: '', type: 'custom' as VariableType, min: '', max: '', mostLikely: '', weight: '', unit: '' });
@@ -127,7 +241,8 @@ export default function ProjectDetail() {
   };
 
   const handleRunSimulation = async () => {
-    if (!currentProject || currentProject.variables.length === 0) {
+    const variables = activeVariables;
+    if (!currentProject || variables.length === 0) {
       alert('请先添加至少一个变量');
       return;
     }
@@ -137,7 +252,17 @@ export default function ProjectDetail() {
       const interval = setInterval(() => {
         setRunProgress(p => Math.min(p + Math.random() * 15, 85));
       }, 150);
-      const result = await api.simulations.run(id, { iterations, threshold });
+      let result;
+      if (activeScenarioId) {
+        result = await api.simulations.runScenario(activeScenarioId, { iterations, threshold });
+        updateScenarioLastRun(activeScenarioId, result.timestamp,
+          result.lossProbability < 0.1 ? 'low' :
+          result.lossProbability < 0.3 ? 'medium-low' :
+          result.lossProbability < 0.5 ? 'medium' : 'high'
+        );
+      } else {
+        result = await api.simulations.run(id, { iterations, threshold });
+      }
       clearInterval(interval);
       setRunProgress(100);
       addSimulation(result);
@@ -185,11 +310,23 @@ export default function ProjectDetail() {
                 <h1 className="text-xl font-bold text-white truncate flex items-center gap-2">
                   <BarChart3 className="w-5 h-5 text-monte-accent flex-shrink-0" />
                   {currentProject.name}
+                  {currentScenario && (
+                    <span className="text-sm font-normal text-monte-muted">
+                      / {currentScenario.name}
+                    </span>
+                  )}
                 </h1>
                 <p className="text-xs text-monte-muted truncate">{currentProject.description || '无描述'}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowScenarioPanel(!showScenarioPanel)}
+                className={`btn-secondary text-sm ${showScenarioPanel ? 'bg-monte-accent/20 border-monte-accent/40' : ''}`}
+              >
+                <GitBranch className="w-4 h-4" />
+                场景
+              </button>
               <button onClick={() => setShowCompareModal(true)} className="btn-secondary text-sm" disabled={simulations.length < 2}>
                 <GitCompare className="w-4 h-4" />
                 对比
@@ -201,14 +338,73 @@ export default function ProjectDetail() {
 
       <main className="container mx-auto px-6 py-8">
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-          <section className="xl:col-span-5 space-y-6">
+          {showScenarioPanel && (
+            <section className="xl:col-span-3 space-y-6">
+              <div className="card">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                    <GitBranch className="w-5 h-5 text-monte-accent" />
+                    场景分支
+                    <span className="badge bg-monte-accent/20 text-monte-accent border border-monte-accent/30 ml-2">
+                      {scenarios.length}
+                    </span>
+                  </h2>
+                </div>
+                <ScenarioTree
+                  scenarios={scenarios}
+                  currentScenarioId={currentScenario?.id || null}
+                  onSelect={handleSelectScenario}
+                  onDelete={handleDeleteScenario}
+                  onCreateBranch={handleCreateBranch}
+                  onRename={handleRenameScenario}
+                />
+                <div className="mt-4 pt-4 border-t border-monte-border space-y-2">
+                  <button
+                    onClick={() => handleCreateBranch(activeScenarioId || scenarios[0]?.id, 'baseline')}
+                    className="w-full btn-secondary text-sm py-2"
+                  >
+                    <Plus className="w-4 h-4" />
+                    新建场景
+                  </button>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => handleCreateBranch(activeScenarioId || scenarios[0]?.id, 'optimistic')}
+                      className="btn-secondary text-xs py-1.5 text-monte-safe"
+                      title="创建乐观场景（参数+10%）"
+                    >
+                      <Sun className="w-4 h-4" />
+                      乐观
+                    </button>
+                    <button
+                      onClick={() => handleCreateBranch(activeScenarioId || scenarios[0]?.id, 'baseline')}
+                      className="btn-secondary text-xs py-1.5 text-monte-accent"
+                      title="复制当前场景"
+                    >
+                      <Copy className="w-4 h-4" />
+                      复制
+                    </button>
+                    <button
+                      onClick={() => handleCreateBranch(activeScenarioId || scenarios[0]?.id, 'pessimistic')}
+                      className="btn-secondary text-xs py-1.5 text-monte-danger"
+                      title="创建悲观场景（参数-10%）"
+                    >
+                      <CloudRain className="w-4 h-4" />
+                      悲观
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          <section className={`space-y-6 ${showScenarioPanel ? 'xl:col-span-4' : 'xl:col-span-5'}`}>
             <div className="card">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                   <Layers className="w-5 h-5 text-monte-accent" />
                   变量管理
                   <span className="badge bg-monte-accent/20 text-monte-accent border border-monte-accent/30 ml-2">
-                    {currentProject.variables.length}
+                    {activeVariables.length}
                   </span>
                 </h2>
                 <button onClick={() => setShowVarModal(true)} className="btn-primary text-sm py-1.5">
@@ -230,7 +426,7 @@ export default function ProjectDetail() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-monte-border/50">
-                    {currentProject.variables.length === 0 ? (
+                    {activeVariables.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="td text-center text-monte-muted py-10">
                           <div className="flex flex-col items-center gap-2">
@@ -239,7 +435,7 @@ export default function ProjectDetail() {
                           </div>
                         </td>
                       </tr>
-                    ) : currentProject.variables.map(v => {
+                    ) : activeVariables.map(v => {
                       const config = VARIABLE_TYPE_CONFIG[v.type];
                       const Icon = config.icon;
                       const isEditing = editingId === v.id;
@@ -378,9 +574,9 @@ export default function ProjectDetail() {
 
                 <button
                   onClick={handleRunSimulation}
-                  disabled={running || currentProject.variables.length === 0}
+                  disabled={running || activeVariables.length === 0}
                   className={`w-full py-3 rounded-xl font-semibold text-white transition-all flex items-center justify-center gap-2 ${
-                    running || currentProject.variables.length === 0
+                    running || activeVariables.length === 0
                       ? 'bg-monte-border cursor-not-allowed opacity-60'
                       : 'bg-gradient-to-r from-monte-accent via-monte-accent2 to-purple-500 hover:shadow-glow hover:-translate-y-0.5 active:translate-y-0'
                   }`}
@@ -398,7 +594,7 @@ export default function ProjectDetail() {
                   )}
                 </button>
 
-                {currentProject.variables.length === 0 && (
+                {activeVariables.length === 0 && (
                   <p className="text-xs text-monte-warn text-center flex items-center justify-center gap-1">
                     <AlertTriangle className="w-3.5 h-3.5" />
                     请先添加变量再运行模拟
@@ -415,7 +611,7 @@ export default function ProjectDetail() {
             />
           </section>
 
-          <section className="xl:col-span-7 space-y-6">
+          <section className={`space-y-6 ${showScenarioPanel ? 'xl:col-span-5' : 'xl:col-span-7'}`}>
             {!currentSimulation ? (
               <div className="card h-[600px] flex flex-col items-center justify-center text-center">
                 <div className="w-24 h-24 mb-6 rounded-3xl bg-gradient-to-br from-monte-accent/20 to-monte-accent2/20 border border-monte-accent/30 flex items-center justify-center">

@@ -6,6 +6,7 @@ import { useAppStore } from '@/store/useAppStore';
 import type { Project } from '../../shared/types.js';
 
 type ProjectListItem = Project & {
+  scenarioCount: number;
   variableCount: number;
   simulationCount: number;
   lastSimulationAt: string | null;
