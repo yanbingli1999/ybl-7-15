@@ -127,7 +127,6 @@ router.post('/project/:projectId/branch', (req: Request, res: Response) => {
   }
 
   const sourceVariables = variablesStore.filter(v => v.scenarioId === dto.sourceScenarioId);
-  const adjustFactor = dto.adjustFactor ?? 0;
 
   const now = new Date().toISOString();
   const newScenario: Scenario = {
@@ -146,15 +145,10 @@ router.post('/project/:projectId/branch', (req: Request, res: Response) => {
   const createdScenario = scenariosStore.create(newScenario);
 
   const newVariables = sourceVariables.map(v => {
-    const range = v.max - v.min;
-    const adjustment = range * adjustFactor;
     return {
       ...v,
       id: uuidv4(),
       scenarioId: createdScenario.id,
-      min: v.min + adjustment,
-      max: v.max + adjustment,
-      mostLikely: v.mostLikely + adjustment,
       createdAt: now,
     } as Variable;
   });

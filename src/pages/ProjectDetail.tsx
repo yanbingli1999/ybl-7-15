@@ -39,6 +39,7 @@ export default function ProjectDetail() {
   const [showVarModal, setShowVarModal] = useState(false);
   const [showCompareModal, setShowCompareModal] = useState(false);
   const [showScenarioPanel, setShowScenarioPanel] = useState(true);
+  const [allSimulations, setAllSimulations] = useState<SimulationResult[]>([]);
   const [running, setRunning] = useState(false);
   const [iterations, setIterations] = useState(10000);
   const [threshold, setThreshold] = useState(0);
@@ -109,12 +110,6 @@ export default function ProjectDetail() {
       pessimistic: '悲观',
       custom: '自定义',
     };
-    const adjustFactors: Record<ScenarioType, number> = {
-      baseline: 0,
-      optimistic: 0.1,
-      pessimistic: -0.1,
-      custom: 0,
-    };
 
     const sourceScenario = scenarios.find(s => s.id === sourceId);
     const name = prompt('场景名称:', `${sourceScenario?.name || '场景'} - ${typeNames[type]}`);
@@ -125,7 +120,6 @@ export default function ProjectDetail() {
         name,
         type,
         sourceScenarioId: sourceId,
-        adjustFactor: adjustFactors[type],
       });
       addScenario(newScenario);
       const scenariosData = await api.scenarios.listByProject(id);
@@ -279,9 +273,24 @@ export default function ProjectDetail() {
     try {
       await api.simulations.remove(simId);
       removeSimulation(simId);
+      setAllSimulations(prev => prev.filter(s => s.id !== simId));
     } catch (err) {
       alert(err instanceof Error ? err.message : '删除失败');
     }
+  };
+
+  const loadAllSimulations = async () => {
+    try {
+      const sims = await api.simulations.listByProject(id);
+      setAllSimulations(sims);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '加载模拟结果失败');
+    }
+  };
+
+  const handleOpenCompare = () => {
+    loadAllSimulations();
+    setShowCompareModal(true);
   };
 
   const riskLevel = useMemo(() => {
@@ -327,7 +336,7 @@ export default function ProjectDetail() {
                 <GitBranch className="w-4 h-4" />
                 场景
               </button>
-              <button onClick={() => setShowCompareModal(true)} className="btn-secondary text-sm" disabled={simulations.length < 2}>
+              <button onClick={handleOpenCompare} className="btn-secondary text-sm">
                 <GitCompare className="w-4 h-4" />
                 对比
               </button>
@@ -848,7 +857,8 @@ export default function ProjectDetail() {
 
       {showCompareModal && (
         <CompareModal
-          simulations={simulations}
+          simulations={allSimulations}
+          scenarios={scenarios}
           projectId={id}
           onClose={() => setShowCompareModal(false)}
           onCreated={(compareId) => navigate(`/project/${id}/compare/${compareId}`)}

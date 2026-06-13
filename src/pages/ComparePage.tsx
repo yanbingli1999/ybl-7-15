@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, GitCompare, BarChart3, TrendingDown, TrendingUp, Minus, AlertCircle,
+  Target, Sun, CloudRain, Settings,
 } from 'lucide-react';
 import { api } from '@/lib/api';
-import type { CompareRecord, SimulationResult } from '../../shared/types.js';
+import type { CompareRecord, SimulationResult, Scenario, ScenarioType } from '../../shared/types.js';
 import { formatNumber, formatPercentage } from '../../shared/monteCarlo.js';
 import HistogramChart from '@/components/HistogramChart';
 import StatsCards from '@/components/StatsCards';
@@ -13,17 +14,29 @@ interface CompareDetail extends CompareRecord {
   simulations: SimulationResult[];
 }
 
+const SCENARIO_TYPE_CONFIG: Record<ScenarioType, { label: string; icon: any; color: string }> = {
+  baseline: { label: '基准', icon: Target, color: 'text-monte-accent' },
+  optimistic: { label: '乐观', icon: Sun, color: 'text-monte-safe' },
+  pessimistic: { label: '悲观', icon: CloudRain, color: 'text-monte-danger' },
+  custom: { label: '自定义', icon: Settings, color: 'text-monte-muted' },
+};
+
 export default function ComparePage() {
   const { id = '', compareId = '' } = useParams();
   const navigate = useNavigate();
   const [data, setData] = useState<CompareDetail | null>(null);
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const d = await api.compare.get(compareId);
+        const [d, scens] = await Promise.all([
+          api.compare.get(compareId),
+          api.scenarios.listByProject(id),
+        ]);
         setData(d as CompareDetail);
+        setScenarios(scens as unknown as Scenario[]);
       } catch (err) {
         alert(err instanceof Error ? err.message : '加载失败');
         navigate(`/project/${id}`);
@@ -33,6 +46,11 @@ export default function ComparePage() {
     };
     load();
   }, [compareId, id]);
+
+  const getScenario = (scenarioId?: string): Scenario | undefined => {
+    if (!scenarioId) return undefined;
+    return scenarios.find(s => s.id === scenarioId);
+  };
 
   if (loading || !data) {
     return <div className="flex items-center justify-center h-screen"><div className="text-monte-muted">加载中...</div></div>;
@@ -75,12 +93,19 @@ export default function ComparePage() {
                 <h1 className="text-xl font-bold text-white truncate">{data.name}</h1>
               </div>
             </div>
-            <div className="flex items-center gap-2 text-sm">
-              {sims.map((_, i) => (
-                <span key={i} className="badge bg-monte-accent/20 text-monte-accent border border-monte-accent/30">
-                  #{i + 1} {sims[i].runName.slice(0, 20)}
-                </span>
-              ))}
+            <div className="flex items-center gap-2 text-sm flex-wrap">
+              {sims.map((sim, i) => {
+                const scenario = getScenario(sim.scenarioId);
+                const typeConfig = scenario ? SCENARIO_TYPE_CONFIG[scenario.type] : null;
+                const TypeIcon = typeConfig?.icon;
+                return (
+                  <span key={i} className="badge bg-monte-accent/20 text-monte-accent border border-monte-accent/30 flex items-center gap-1">
+                    #{i + 1}
+                    {TypeIcon && <TypeIcon className="w-3 h-3" />}
+                    {scenario?.name || '未知场景'} - {sim.runName.slice(0, 15)}
+                  </span>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -97,14 +122,25 @@ export default function ComparePage() {
               <thead>
                 <tr className="border-b border-monte-border">
                   <th className="th">指标</th>
-                  {sims.map((s, i) => (
-                    <th key={s.id} className="th text-center">
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="badge bg-monte-accent/20 text-monte-accent mb-1">#{i + 1}</span>
-                        <span className="text-[11px] font-normal text-monte-muted max-w-[140px] truncate">{s.runName}</span>
-                      </div>
-                    </th>
-                  ))}
+                  {sims.map((s, i) => {
+                    const scenario = getScenario(s.scenarioId);
+                    const typeConfig = scenario ? SCENARIO_TYPE_CONFIG[scenario.type] : null;
+                    const TypeIcon = typeConfig?.icon;
+                    return (
+                      <th key={s.id} className="th text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="badge bg-monte-accent/20 text-monte-accent mb-1">#{i + 1}</span>
+                          {scenario && TypeIcon && (
+                            <span className={`flex items-center gap-1 text-[10px] ${typeConfig?.color}`}>
+                              <TypeIcon className="w-3 h-3" />
+                              {scenario.name}
+                            </span>
+                          )}
+                          <span className="text-[11px] font-normal text-white max-w-[140px] truncate">{s.runName}</span>
+                        </div>
+                      </th>
+                    );
+                  })}
                   {sims.length >= 2 && (
                     <th className="th text-center">
                       <span className="text-monte-warn">vs #{sims.length}</span>
@@ -278,18 +314,29 @@ export default function ComparePage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {sims.map((s, i) => (
-            <div key={s.id} className="space-y-4">
-              <div className="card border-monte-accent/30">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="badge bg-monte-accent/20 text-monte-accent border border-monte-accent/30 font-bold">#{i + 1}</span>
-                  <h3 className="text-base font-semibold text-white truncate">{s.runName}</h3>
+          {sims.map((s, i) => {
+            const scenario = getScenario(s.scenarioId);
+            const typeConfig = scenario ? SCENARIO_TYPE_CONFIG[scenario.type] : null;
+            const TypeIcon = typeConfig?.icon;
+            return (
+              <div key={s.id} className="space-y-4">
+                <div className="card border-monte-accent/30">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="badge bg-monte-accent/20 text-monte-accent border border-monte-accent/30 font-bold">#{i + 1}</span>
+                    {scenario && TypeIcon && (
+                      <span className={`flex items-center gap-1 text-xs ${typeConfig?.color}`}>
+                        <TypeIcon className="w-3.5 h-3.5" />
+                        {scenario.name}
+                      </span>
+                    )}
+                    <h3 className="text-base font-semibold text-white truncate flex-1">{s.runName}</h3>
+                  </div>
+                  <StatsCards sim={s} />
                 </div>
-                <StatsCards sim={s} />
+                <HistogramChart sim={s} colorIndex={i} showTitle={false} />
               </div>
-              <HistogramChart sim={s} colorIndex={i} showTitle={false} />
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
